@@ -1,0 +1,224 @@
+---
+title: "MATH1324 Assignment 1"
+subtitle: Statistical analysis of financial real-world Data sets
+output:
+  pdf_document
+fontsize: 11pt
+geometry: margin=1in
+---
+
+## Student Details
+
+
+Thansidh Kirthan Nadar
+S4133992
+
+
+## Problem Statement
+
+To examine the central tendency, variability, long-term trends, and interdependence of two real financial time series—the price of Bitcoin and the S&P 500 index—between 2018 and 2025. To determine whether a series has a normal distribution by measuring and showing its relationship over time, including a six-month rolling correlation. To create a succinct, reproducible report with code, figures, and succinct interpretations, use R (R Markdown).
+
+## Load Packages
+
+```{r}
+library(readr)      #  to load CSV files
+library(dplyr)      #  to clean data
+library(ggplot2)    #  for plots
+library(lubridate)  #  to parse dates
+library(psych)      #  for descriptive stats
+library(zoo)        #  to roll correlation
+library(knitr)      #  to clean tables in the report
+
+
+```
+
+## Data
+
+
+```{r}
+setwd("~/Desktop/RMIT/APPLIED ANALTICS/ass1 data sets") # This is my working directory
+sp500_raw <- read_csv("S&P 500 Historical Data1825.csv", show_col_types = FALSE)
+btc_raw   <- read_csv("Bitcoin Historical Data1825.csv",   show_col_types = FALSE)
+
+# Cleaning data (Price)
+sp500 <- sp500_raw %>%
+  mutate(
+    Price = as.numeric(Price),
+    Date  = lubridate::dmy(Date)
+  ) %>%
+  filter(!is.na(Date), is.finite(Price)) %>%
+  arrange(Date)
+
+btc <- btc_raw %>%
+  mutate(
+    Price = as.numeric(Price),
+    Date  = lubridate::dmy(Date)
+  ) %>%
+  filter(!is.na(Date), is.finite(Price)) %>%
+  arrange(Date)
+
+# Structure checks 
+str_sp <- data.frame(column = names(sp500), class = sapply(sp500, class))
+str_bt <- data.frame(column = names(btc),   class = sapply(btc, class))
+
+# heads and structures
+kable(head(sp500, 8), caption = "Table 1. Cleaned S&P 500 (first 8 rows)")
+kable(head(btc,   8), caption = "Table 2. Cleaned Bitcoin (first 8 rows)")
+kable(str_sp, caption = "Table 3. Structure of S&P 500 data (classes)")
+kable(str_bt, caption = "Table 4. Structure of Bitcoin data (classes)")
+
+
+
+```
+
+
+
+## Task 1
+Descriptive Statistics: Calculate, for example, the mean, median, mode, range, standard deviation, etc, of both the S&P 500 data and Bitcoin data.  Compare the measures of central tendency and variability between the two datasets.
+
+
+```{r}
+
+# to round  'digits' decimals to form bins, then return the most frequent bin value
+approx_mode <- function(x, digits = 2){
+  x2 <- round(x, digits)
+  ux <- unique(x2)
+  ux[which.max(tabulate(match(x2, ux)))]
+}
+
+# Descriptives via psych
+d_sp <- psych::describe(sp500$Price)
+d_bt <- psych::describe(btc$Price)
+
+# Assemble a concise comparison table
+tab_desc <- tibble::tibble(
+  Metric    = c("Mean", "Median", "Approx. Mode", "Std. Deviation", "Minimum", "Maximum", "Range", "N"),
+  `S&P 500` = c(d_sp$mean, d_sp$median, approx_mode(sp500$Price, 2),
+                d_sp$sd,   d_sp$min,    d_sp$max,   d_sp$max - d_sp$min, d_sp$n),
+  `Bitcoin` = c(d_bt$mean, d_bt$median, approx_mode(btc$Price, 2),
+                d_bt$sd,   d_bt$min,    d_bt$max,   d_bt$max - d_bt$min, d_bt$n)
+)
+
+kable(tab_desc, digits = 3, caption = "Table 5. Descriptive statistics for S&P 500 and Bitcoin")
+ 
+
+
+```
+
+
+
+
+## Task 2
+By drawing a plot, showing the trend or pattern of S&P 500 data and Bitcoin data over seven years (for example, does it have an increasing or decreasing trend or pattern, that is, whether it's going up, down, or staying relatively flat),  for each dataset separately, and interpreting the findings. Additionally, create a plot that shows the correlation calculated every six months between the S&P 500 data and Bitcoin data over seven years.
+
+
+```{r}
+# Time series : Data, Price
+ggplot(sp500, aes(Date, Price)) +
+  geom_line(color = "blue") +
+  labs(title = "S&P 500 Prices (2018–2025)", x = "Date", y = "Index Price")
+# Time series: Bitcoin
+ggplot(btc, aes(Date, Price)) +
+  geom_line(color = "orange") +
+  labs(title = "Bitcoin Prices (2018–2025)", x = "Date", y = "Price (USD)")
+# To join by date and compute rolling 6-month 
+merged <- dplyr::inner_join(
+  sp500 %>% dplyr::select(Date, sp500 = Price),
+  btc   %>% dplyr::select(Date, btc   = Price),
+  by = "Date"
+) %>% dplyr::arrange(Date)
+
+merged <- merged %>%
+  dplyr::mutate(
+    roll_corr = zoo::rollapplyr(
+      data = cbind(sp500, btc),
+      width = 126,
+      FUN = function(x) stats::cor(x[,1], x[,2], use = "complete.obs"),
+      by.column = FALSE,
+      fill = NA_real_
+    )
+  )
+
+# These are for rolling correlation plot
+ggplot(merged, aes(Date, roll_corr)) +
+  geom_line(color = "purple") +
+  labs(title = "Rolling 6-Month Correlation: S&P 500 vs Bitcoin",
+       x = "Date", y = "Correlation Coefficient")
+
+
+
+```
+
+## Task 3
+Compute the correlation coefficient between S&P 500 data and Bitcoin data to explore if there's any relationship between the two. Visualize the relation/correlation using scatter plots and interpret the findings. [Hint: A scatter plot visually represents this relationship. While the correlation coefficient (a number) tells you how strongly the two variables are related, the scatter plot shows the pattern or trend of this relationship. So, while the correlation itself is a number, the scatter plot helps you visualize how the two datasets are related.]
+
+
+```{r}
+# The overall Pearson correlation on matched dates
+cor_coef <- stats::cor(merged$sp500, merged$btc, use = "complete.obs")
+
+# To report the number clearly in a small table
+kable(
+  data.frame(Statistic = "Pearson correlation (matched dates)", Value = round(cor_coef, 3)),
+  caption = "Table 6. Overall correlation between S&P 500 and Bitcoin"
+)
+
+# To scatter with linear fit
+ggplot(merged, aes(sp500, btc)) +
+  geom_point(alpha = 0.45, color = "darkgreen") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(title = "Scatter: S&P 500 vs Bitcoin (linear fit)",
+       x = "S&P 500 Price", y = "Bitcoin Price (USD)")
+ 
+
+
+```
+
+## Task 4
+Assess whether the S&P 500 data and Bitcoin data follow a normal distribution. Analyze each dataset separately and interpret the findings.
+
+
+
+```{r}
+# These QQ plots compare empirical quantiles with Normal-theory quantiles
+par(mfrow = c(1,2))
+qqnorm(sp500$Price, main = "QQ Plot — S&P 500"); qqline(sp500$Price, col = "red")
+qqnorm(btc$Price,   main = "QQ Plot — Bitcoin");  qqline(btc$Price,   col = "red")
+par(mfrow = c(1,1))
+
+# The shapiro–Wilk tests on samples
+s_sp <- sample(sp500$Price, min(500, nrow(sp500)))
+s_bt <- sample(btc$Price,   min(500, nrow(btc)))
+
+sw_tab <- data.frame(
+  Dataset = c("S&P 500", "Bitcoin"),
+  W       = c(unname(shapiro.test(s_sp)$statistic), unname(shapiro.test(s_bt)$statistic)),
+  p_value = c(unname(shapiro.test(s_sp)$p.value),   unname(shapiro.test(s_bt)$p.value))
+)
+
+kable(sw_tab, digits = 4, caption = "Table 7. Shapiro–Wilk normality tests (random samples)")
+ 
+
+
+```
+
+## References
+1. R Core Team (2025). R: A Language and Environment for Statistical Computing. R Foundation for Statistical Computing.
+
+2. Wickham, H. (2016). ggplot2: Elegant Graphics for Data Analysis. Springer.
+
+3. Wickham, H., François, R., Henry, L., & Müller, K. (2023). dplyr: A Grammar of Data Manipulation (R package).
+
+4. Grolemund, G., & Wickham, H. (2011). Dates and times made easy with lubridate. Journal of Statistical Software, 40(3), 1–25.
+
+5. Revelle, W. (2025). psych (R package).
+
+6. Zeileis, A., & Grothendieck, G. (2005). zoo: S3 infrastructure for regular and irregular time series. Journal of Statistical Software, 14(6), 1–27.
+
+7. Xie, Y. (2015). Dynamic Documents with R and knitr (2nd ed.). Chapman & Hall/CRC.
+
+8. Xie, Y. (2024). knitr (R package).
+
+9. Shapiro, S. S., & Wilk, M. B. (1965). An analysis of variance test for normality (complete samples). Biometrika, 52(3–4), 591–611.
+
+10. Datasets: S&P 500 Historical Data (2018–2025) and Bitcoin Historical Data (2018–2025), course-provided datasets.
